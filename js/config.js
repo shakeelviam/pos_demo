@@ -741,3 +741,24 @@ console.log(
   'API:',
   CONFIG.API_URL
 );
+
+export const APP_CONFIG = {
+  companyName: CONFIG.COMPANY.name,
+  companySubtitle: 'Watch Wholesale POS',
+  demoUsers: [
+    {
+      username: 'sales',
+      password: 'sales123',
+      name: 'Salesperson',
+      role: 'salesperson'
+    },
+    {
+      username: 'cashier',
+      password: 'cashier123',
+      name: 'Cashier',
+      role: 'cashier'
+    }
+  ]
+};
+
+export { CONFIG, formatCurrency };
