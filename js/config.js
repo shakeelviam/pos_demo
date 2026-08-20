@@ -761,4 +761,8 @@ export const APP_CONFIG = {
   ]
 };
 
+export function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export { CONFIG, formatCurrency };
