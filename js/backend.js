@@ -1,48 +1,202 @@
-/*
-  Shared data adapter.
+import { CONFIG } from "./config.js";
+import { PRODUCTS } from "./data.js";
 
-  IMPORTANT:
-  GitHub Pages + localStorage is suitable for a single-browser demo only.
-  For a real showroom where salesperson and cashier use DIFFERENT devices,
-  connect this adapter to a shared backend such as Supabase.
+const API_URL = CONFIG.API_URL;
 
-  The UI is deliberately written against this adapter so the backend can be
-  swapped without rewriting the sales/cashier screens.
-*/
+async function request(action, payload = {}, method = "GET") {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.API.timeout || 15000);
+  try {
+    let url = `${API_URL}?action=${encodeURIComponent(action)}`;
+    const options = { method, signal: controller.signal };
+    if (method === "GET") {
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          url += `&${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+        }
+      });
+    } else {
+      options.headers = { "Content-Type": "text/plain;charset=utf-8" };
+      options.body = JSON.stringify({ action, ...payload });
+    }
+    const response = await fetch(url, options);
+    if (!response.ok) throw new Error(`Backend request failed (${response.status}).`);
+    const result = await response.json();
+    if (!result.success) throw new Error(result.error || "Backend request failed.");
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-import { Store } from "./storage.js";
+const num = value => Number(value || 0);
+const mobile = value => String(value || "").replace(/[\s\-()]/g, "");
+
+function normalizeOrder(row, items = []) {
+  if (!row) return null;
+  return {
+    id: row.salesOrderId,
+    number: row.salesOrderNumber,
+    status: row.status,
+    customer: {
+      id: row.customerId,
+      mobile: row.customerMobile,
+      phone: row.customerMobile,
+      name: row.customerName || "Walk-in Customer"
+    },
+    items: items.map(item => ({
+      productId: item.productId,
+      brandId: item.brandId,
+      brandName: item.brandName,
+      model: item.model,
+      name: item.productName,
+      sku: item.sku,
+      quantity: num(item.quantity),
+      unitPrice: num(item.unitPrice),
+      lineTotal: num(item.total)
+    })),
+    subtotal: num(row.subtotal),
+    discount: num(row.discount),
+    tax: num(row.tax),
+    total: num(row.total),
+    totalQuantity: num(row.totalQuantity),
+    itemCount: num(row.itemCount),
+    notes: row.notes || "",
+    createdBy: { id: row.salespersonId, name: row.salespersonName, role: "salesperson" },
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function normalizeInvoice(row, items = []) {
+  if (!row) return null;
+  return {
+    id: row.invoiceId,
+    number: row.invoiceNumber,
+    salesOrderId: row.salesOrderId,
+    salesOrderNumber: row.salesOrderNumber,
+    customer: { id: row.customerId, mobile: row.customerMobile, phone: row.customerMobile, name: row.customerName },
+    cashier: { id: row.cashierId, name: row.cashierName },
+    paymentMethod: row.paymentMethod,
+    status: row.status,
+    items: items.map(item => ({
+      productId: item.productId,
+      brandId: item.brandId,
+      brandName: item.brandName,
+      model: item.model,
+      name: item.productName,
+      sku: item.sku,
+      quantity: num(item.quantity),
+      unitPrice: num(item.unitPrice),
+      lineTotal: num(item.total)
+    })),
+    subtotal: num(row.subtotal), discount: num(row.discount), tax: num(row.tax), total: num(row.total),
+    totalQuantity: num(row.totalQuantity), itemCount: num(row.itemCount), notes: row.notes || "", createdAt: row.createdAt
+  };
+}
+
+async function getOrder(idOrNumber) {
+  const result = await request("salesOrder", { salesOrderId: idOrNumber, salesOrderNumber: idOrNumber });
+  return normalizeOrder(result.salesOrder, result.items || []);
+}
 
 export const Backend = {
-  async listSalesOrders() {
-    return Store.getSalesOrders();
+  async health() { return request("health"); },
+
+  async listBrands() {
+    const result = await request("brands");
+    return result.brands || [];
+  },
+
+  async listProducts(params = {}) {
+    const result = await request("products", params);
+    return result.products || [];
+  },
+
+  async listCustomers(params = {}) {
+    const result = await request("customers", params);
+    return result.customers || [];
+  },
+
+  async listSalesOrders(params = {}) {
+    const result = await request("salesOrders", params);
+    return Promise.all((result.salesOrders || []).map(row => getOrder(row.salesOrderId || row.salesOrderNumber)));
   },
 
   async findSalesOrders(query) {
-    const q = String(query || "").trim().toLowerCase();
-    const orders = await this.listSalesOrders();
-    if (!q) return orders;
-    return orders.filter(o =>
-      [o.number, o.customer?.name, o.customer?.phone, o.status]
-        .filter(Boolean)
-        .some(v => String(v).toLowerCase().includes(q))
-    );
+    const q = String(query || "").trim();
+    if (!q) return this.listSalesOrders();
+    const normalized = mobile(q);
+    const numeric = /^\+?\d+$/.test(normalized);
+    const result = await request("salesOrders", numeric ? { mobile: normalized } : { salesOrderNumber: q });
+    let rows = result.salesOrders || [];
+    if (!rows.length && !numeric) {
+      const all = await request("salesOrders");
+      const needle = q.toLowerCase();
+      rows = (all.salesOrders || []).filter(row =>
+        [row.salesOrderNumber, row.customerName, row.customerMobile].some(v => String(v || "").toLowerCase().includes(needle))
+      );
+    }
+    return Promise.all(rows.map(row => getOrder(row.salesOrderId || row.salesOrderNumber)));
   },
 
   async getSalesOrder(id) {
-    return (await this.listSalesOrders()).find(o => o.id === id);
+    try { return await getOrder(id); } catch { return null; }
   },
 
   async createSalesOrder(order) {
-    Store.createSalesOrder(order);
-    return order;
+    const backendProducts = await this.listProducts();
+    const items = (order.items || []).map(item => {
+      const local = PRODUCTS.find(p => p.id === item.productId) || item;
+      const model = String(local.model || item.model || "").toLowerCase();
+      const sku = String(local.sku || item.sku || "").toLowerCase();
+      const name = String(local.name || item.name || "").toLowerCase();
+      const product = backendProducts.find(p =>
+        String(p.model || "").toLowerCase() === model ||
+        String(p.sku || "").toLowerCase() === sku ||
+        String(p.name || "").toLowerCase() === name
+      );
+      if (!product) throw new Error(`Product is not configured in Google Sheets: ${local.model || local.name || item.productId}`);
+      return { productId: product.productId, quantity: num(item.quantity), unitPrice: num(item.unitPrice ?? local.price), discount: 0, tax: 0 };
+    });
+
+    const customer = order.customer || {};
+    const result = await request("createSalesOrder", {
+      customerMobile: mobile(customer.mobile || customer.phone),
+      customerName: customer.name || "Walk-in Customer",
+      customerCompany: customer.company || "",
+      customerEmail: customer.email || "",
+      customerAddress: customer.address || "",
+      salespersonId: order.createdBy?.id || "",
+      salespersonName: order.createdBy?.name || "Salesperson",
+      notes: order.notes || "",
+      discount: num(order.discount),
+      tax: num(order.tax),
+      items
+    }, "POST");
+    return normalizeOrder(result.salesOrder, result.items || []);
   },
 
   async updateSalesOrder(id, patch) {
-    Store.updateSalesOrder(id, patch);
+    return request("updateSalesOrder", { salesOrderId: id, ...patch }, "POST");
   },
 
   async createInvoice(invoice) {
-    Store.createInvoice(invoice);
-    return invoice;
-  }
+    const session = invoice.createdBy || invoice.cashier || {};
+    const result = await request("createInvoice", {
+      salesOrderId: invoice.salesOrderId || invoice.orderId || invoice.id,
+      paymentMethod: String(invoice.paymentMethod || "CASH").toUpperCase().replace(/\s+/g, "_"),
+      cashierId: session.id || session.userId || "",
+      cashierName: session.name || "Cashier",
+      notes: invoice.notes || ""
+    }, "POST");
+    return normalizeInvoice(result.invoice, result.items || []);
+  },
+
+  async getInvoice(id) {
+    const result = await request("invoice", { invoiceId: id });
+    return normalizeInvoice(result.invoice, result.items || []);
+  },
+
+  async dashboard() { return request("dashboard"); }
 };
