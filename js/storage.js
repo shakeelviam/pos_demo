@@ -1,4 +1,8 @@
-import { APP_CONFIG, todayISO } from "./config.js";
+import { CONFIG, todayISO } from "./config.js";
+
+const STORAGE_KEY = CONFIG.STORAGE.session || "timehouse_pos_session";
+const SALES_ORDER_PREFIX = CONFIG.INVOICE?.salesOrderPrefix || "SO";
+const INVOICE_PREFIX = CONFIG.INVOICE?.prefix || "INV";
 
 const defaultState = {
   session: null,
@@ -12,7 +16,7 @@ const defaultState = {
 
 function load() {
   try {
-    const raw = localStorage.getItem(APP_CONFIG.storageKey);
+    const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? { ...defaultState, ...JSON.parse(raw) } : structuredClone(defaultState);
   } catch {
     return structuredClone(defaultState);
@@ -23,7 +27,7 @@ let db = load();
 
 function save() {
   try {
-    localStorage.setItem(APP_CONFIG.storageKey, JSON.stringify(db));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
   } catch (e) {
     console.warn("Storage unavailable", e);
   }
@@ -45,14 +49,14 @@ export const Store = {
     const year = new Date().getFullYear();
     const n = db.counters.salesOrder++;
     save();
-    return `${APP_CONFIG.salesOrderPrefix}-${year}-${String(n).padStart(6,"0")}`;
+    return `${SALES_ORDER_PREFIX}-${year}-${String(n).padStart(6,"0")}`;
   },
 
   nextInvoiceNumber() {
     const year = new Date().getFullYear();
     const n = db.counters.invoice++;
     save();
-    return `${APP_CONFIG.invoicePrefix}-${year}-${String(n).padStart(6,"0")}`;
+    return `${INVOICE_PREFIX}-${year}-${String(n).padStart(6,"0")}`;
   },
 
   createSalesOrder(order) {
