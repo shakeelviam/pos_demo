@@ -2,6 +2,8 @@ import { CONFIG } from "./config.js";
 import { PRODUCTS } from "./data.js";
 
 const API_URL = CONFIG.API_URL;
+const num = value => Number(value || 0);
+const mobile = value => String(value || "").replace(/[\s\-()]/g, "");
 
 async function request(action, payload = {}, method = "GET") {
   const controller = new AbortController();
@@ -29,8 +31,15 @@ async function request(action, payload = {}, method = "GET") {
   }
 }
 
-const num = value => Number(value || 0);
-const mobile = value => String(value || "").replace(/[\s\-()]/g, "");
+function totalsObject(row) {
+  return {
+    subtotal: num(row.subtotal),
+    discount: num(row.discount),
+    tax: num(row.tax),
+    grandTotal: num(row.total),
+    totalQuantity: num(row.totalQuantity)
+  };
+}
 
 function normalizeOrder(row, items = []) {
   if (!row) return null;
@@ -42,7 +51,11 @@ function normalizeOrder(row, items = []) {
       id: row.customerId,
       mobile: row.customerMobile,
       phone: row.customerMobile,
-      name: row.customerName || "Walk-in Customer"
+      name: row.customerName || "Walk-in Customer",
+      company: row.customerCompany || "",
+      email: row.customerEmail || "",
+      address: row.customerAddress || "",
+      notes: row.notes || ""
     },
     items: items.map(item => ({
       productId: item.productId,
@@ -51,14 +64,15 @@ function normalizeOrder(row, items = []) {
       model: item.model,
       name: item.productName,
       sku: item.sku,
+      category: "",
       quantity: num(item.quantity),
       unitPrice: num(item.unitPrice),
       lineTotal: num(item.total)
     })),
+    total: totalsObject(row),
     subtotal: num(row.subtotal),
     discount: num(row.discount),
     tax: num(row.tax),
-    total: num(row.total),
     totalQuantity: num(row.totalQuantity),
     itemCount: num(row.itemCount),
     notes: row.notes || "",
@@ -75,7 +89,16 @@ function normalizeInvoice(row, items = []) {
     number: row.invoiceNumber,
     salesOrderId: row.salesOrderId,
     salesOrderNumber: row.salesOrderNumber,
-    customer: { id: row.customerId, mobile: row.customerMobile, phone: row.customerMobile, name: row.customerName },
+    customer: {
+      id: row.customerId,
+      mobile: row.customerMobile,
+      phone: row.customerMobile,
+      name: row.customerName || "Walk-in Customer",
+      company: row.customerCompany || "",
+      email: row.customerEmail || "",
+      address: row.customerAddress || "",
+      notes: row.notes || ""
+    },
     cashier: { id: row.cashierId, name: row.cashierName },
     paymentMethod: row.paymentMethod,
     status: row.status,
@@ -86,12 +109,19 @@ function normalizeInvoice(row, items = []) {
       model: item.model,
       name: item.productName,
       sku: item.sku,
+      category: "",
       quantity: num(item.quantity),
       unitPrice: num(item.unitPrice),
       lineTotal: num(item.total)
     })),
-    subtotal: num(row.subtotal), discount: num(row.discount), tax: num(row.tax), total: num(row.total),
-    totalQuantity: num(row.totalQuantity), itemCount: num(row.itemCount), notes: row.notes || "", createdAt: row.createdAt
+    total: totalsObject(row),
+    subtotal: num(row.subtotal),
+    discount: num(row.discount),
+    tax: num(row.tax),
+    totalQuantity: num(row.totalQuantity),
+    itemCount: num(row.itemCount),
+    notes: row.notes || "",
+    createdAt: row.createdAt
   };
 }
 
